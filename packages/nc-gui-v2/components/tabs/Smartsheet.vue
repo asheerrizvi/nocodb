@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ColumnType, TableType, ViewType } from 'nocodb-sdk'
+import { onBeforeUnmount, onUnmounted } from 'vue'
 import type { Ref } from 'vue'
-import { useUIPermission } from '#imports'
 import SmartsheetGrid from '../smartsheet/Grid.vue'
 import {
   ActiveViewInj,
@@ -17,6 +17,7 @@ import {
   provideSidebar,
   useMetas,
   useProvideSmartsheetStore,
+  useUIPermission,
   watch,
 } from '#imports'
 
@@ -39,20 +40,41 @@ const meta = computed<TableType>(() => metas.value?.[tabMeta?.value?.id as strin
 const reloadEventHook = createEventHook<void>()
 const openNewRecordFormHook = createEventHook<void>()
 
-const {isUIAllowed} = useUIPermission()
+const { isUIAllowed } = useUIPermission()
 
-const {
-  isGallery,
-  isGrid,
-  isForm,
-  isLocked,
-  nestedFilters,
-  sorts,
-} = useProvideSmartsheetStore(activeView as Ref<TableType>, meta)
+const { isGallery, isGrid, isForm, isLocked, nestedFilters, sorts } = useProvideSmartsheetStore(
+  activeView as Ref<TableType>,
+  meta,
+)
 
+
+const id = Math.floor(1000 * Math.random())
+
+watch(
+  activeView,
+  (newView: ViewType) => {
+    if (!newView || !tabMeta.value?.state?.get(newView.id as string)) {
+      return
+    }
+
+    console.log(id, 'watch', newView.id)
+
+    if (
+      tabMeta.value?.state?.get(newView.id as string)?.has('filters') &&
+      !isUIAllowed('filterSync') &&
+      !isUIAllowed('filterChildrenRead')
+    ) {
+      nestedFilters.value = tabMeta.value?.state?.get(newView.id as string)?.get('filters') || []
+    }
+    if (tabMeta.value?.state?.get(newView.id as string)?.has('sorts') && !isUIAllowed('sortSync')) {
+      nestedFilters.value = tabMeta.value?.state?.get(newView.id as string)?.get('sorts') || []
+    }
+  },
+  { immediate: true },
+)
 
 /** keep view level state in tabMeta and restore on view change */
-watch(nestedFilters, (newFilters) => {
+const stopFilterWatch = watch(nestedFilters, (newFilters) => {
   tabMeta.value.state = tabMeta.value.state || new Map()
   if (!tabMeta.value.state.has(activeView.value.id)) {
     tabMeta.value.state.set(activeView.value.id, new Map())
@@ -60,7 +82,9 @@ watch(nestedFilters, (newFilters) => {
   tabMeta.value.state.get(activeView.value.id)!.set('filters', newFilters)
 })
 
-watch(sorts, (newSorts) => {
+const stopSortWatch = watch(sorts, (newSorts) => {
+
+  console.log(id, 'watch-sorts', activeView.value.id, newSorts)
   tabMeta.value.state = tabMeta.value.state || new Map()
   if (!tabMeta.value.state.has(activeView.value.id)) {
     tabMeta.value.state.set(activeView.value.id, new Map())
@@ -68,19 +92,9 @@ watch(sorts, (newSorts) => {
   tabMeta.value.state.get(activeView.value.id)!.set('sorts', newSorts)
 })
 
-watch(activeView, (newView: ViewType) => {
-  if(!newView || !tabMeta.value?.state?.get(newView.id as string)) return
-
-  if (
-    tabMeta.value?.state?.get(newView.id as string)?.has('filters') &&
-    !isUIAllowed('filterSync') &&
-    !isUIAllowed('filterChildrenRead')
-  ) {
-    nestedFilters.value = tabMeta.value?.state?.get(newView.id as string)?.get('filters') || []
-  }
-  if (tabMeta.value?.state?.get(newView.id as string)?.has('sorts') && !isUIAllowed('sortSync')) {
-    nestedFilters.value = tabMeta.value?.state?.get(newView.id as string)?.get('sorts') || []
-  }
+onBeforeUnmount(() => {
+  stopFilterWatch()
+  stopSortWatch()
 })
 
 // provide the sidebar injection state
